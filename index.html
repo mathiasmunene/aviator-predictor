@@ -1,0 +1,223 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Aviator Predictor</title>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+  <style>
+    body {
+      font-family: Arial, sans-serif;
+      margin: 0;
+      padding: 20px;
+      background-color: #f4f4f4;
+    }
+    .container {
+      max-width: 900px;
+      margin: auto;
+      padding: 20px;
+      background-color: #ffffff;
+      border-radius: 8px;
+      box-shadow: 0 2px 10px rgba(0, 0, 0, 0.1);
+    }
+    input, button {
+      padding: 10px;
+      font-size: 1rem;
+      border: 1px solid #ccc;
+      border-radius: 5px;
+    }
+    #chart {
+      width: 100%;
+      height: 400px;
+      margin-top: 20px;
+    }
+    #resultBox {
+      display: none;
+      margin-top: 20px;
+      padding: 15px;
+      background-color: #f1f1f1;
+      border-radius: 5px;
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <h2>Aviator Predictor</h2>
+    <textarea id="historyInput" rows="4" cols="50" placeholder="Enter your game multipliers here, separated by commas..."></textarea><br><br>
+    <button onclick="predictAviator()">Predict</button>
+    
+    <h3>History</h3>
+    <select id="historySelect">
+      <option value="today">Today</option>
+      <option value="yesterday">Yesterday</option>
+      <option value="weekly">Weekly</option>
+    </select>
+    <button onclick="loadHistory()">Load History</button>
+
+    <div id="resultBox"></div>
+
+    <canvas id="chart"></canvas>
+  </div>
+
+  <script>
+    let chart = null;
+
+    function analyzeCycles(rounds) {
+      let cycleInfo = [];
+      for (let i = 1; i < rounds.length; i++) {
+        const diff = rounds[i] - rounds[i-1];
+        cycleInfo.push(diff); // Save differences between rounds to find regularities.
+      }
+
+      // Detect periodicity
+      let cyclePeriod = findCyclePeriod(cycleInfo);
+      
+      if (cyclePeriod) {
+        return `Possible cycle detected every ${cyclePeriod} rounds`;
+      }
+      return "No clear cycle detected";
+    }
+
+    function findCyclePeriod(data) {
+      for (let period = 2; period < data.length; period++) {
+        let match = true;
+        for (let i = period; i < data.length; i++) {
+          if (data[i] !== data[i - period]) {
+            match = false;
+            break;
+          }
+        }
+        if (match) return period;
+      }
+      return null; // No cycle found
+    }
+
+    function weightedPrediction(rounds) {
+      const highRoundWeight = 0.7;
+      const lowRoundWeight = 0.3;
+
+      const recentHighRounds = rounds.filter(x => x >= 5).length;
+      const recentLowRounds = rounds.filter(x => x <= 2).length;
+
+      const prediction = (recentHighRounds * highRoundWeight) + (recentLowRounds * lowRoundWeight);
+      
+      return prediction > 0.5 ? "Chance for spike" : "Chance for low round";
+    }
+
+    function drawChart(data) {
+      const ctx = document.getElementById('chart').getContext('2d');
+      const labels = data.map((_, i) => `#${i + 1}`);
+      
+      const backgroundColors = data.map(val => {
+        if (val >= 5) return 'rgba(0,200,83,0.6)';   // Green (Opportunity)
+        else if (val <= 1.5) return 'rgba(244,67,54,0.6)'; // Red (Danger)
+        else return 'rgba(255,193,7,0.6)';            // Yellow (Neutral)
+      });
+
+      if (chart) chart.destroy();
+
+      chart = new Chart(ctx, {
+        type: 'bar',
+        data: {
+          labels: labels,
+          datasets: [{
+            label: 'Multiplier History',
+            data: data,
+            backgroundColor: backgroundColors,
+            borderColor: '#00000033',
+            borderWidth: 1
+          }]
+        },
+        options: {
+          scales: {
+            y: {
+              beginAtZero: true
+            }
+          }
+        }
+      });
+    }
+
+    function predictAviator() {
+      const input = document.getElementById('historyInput').value;
+      localStorage.setItem('aviatorHistory', input); // Save default history
+
+      const rounds = input.split(',').map(n => parseFloat(n.trim())).filter(n => !isNaN(n));
+      const recent = rounds.slice(-20);
+      const highRounds = recent.filter(x => x >= 5);
+      const lowStreak = countLowStreak(recent);
+      const avg5 = movingAverage(rounds, 5);
+      const avg10 = movingAverage(rounds, 10);
+
+      const probabilities = {
+        2: 0.05,
+        3: 0.12,
+        4: 0.23,
+        5: 0.33,
+        6: 0.41
+      };
+
+      let weightedProb = probabilities[lowStreak] || 0.02;
+      let advice = "";
+
+      const cycleAnalysis = analyzeCycles(rounds);
+      const weightedAdvice = weightedPrediction(rounds);
+
+      if (recent[recent.length - 1] >= 5) {
+        advice = "Big multiplier just hit. Expect 3–6 low rounds. Wait and watch.";
+      } else if (lowStreak >= 4 && weightedProb >= 0.2) {
+        advice = `High chance (${Math.round(weightedProb * 100)}%) of spike. Consider betting soon with moderate cashout.`;
+      } else if (lowStreak >= 2) {
+        advice = `Low streak forming (${lowStreak}). Slight chance (${Math.round(weightedProb * 100)}%) of spike.`;
+      } else {
+        advice = "Market seems random right now. Play cautiously.";
+      }
+
+      document.getElementById('resultBox').style.display = 'block';
+      document.getElementById('resultBox').innerHTML = `
+        <strong>Recent Highs (5x+):</strong> ${highRounds.join(', ') || 'None'}<br>
+        <strong>Current Low Streak:</strong> ${lowStreak}<br>
+        <strong>Moving Avg (Last 5):</strong> ${avg5?.toFixed(2) || 'N/A'}<br>
+        <strong>Moving Avg (Last 10):</strong> ${avg10?.toFixed(2) || 'N/A'}<br>
+        <strong>Spike Probability:</strong> ${Math.round(weightedProb * 100)}%<br><br>
+        <strong>Prediction:</strong> ${advice}<br>
+        <strong>Cycle Analysis:</strong> ${cycleAnalysis}<br>
+        <strong>Weighted Prediction:</strong> ${weightedAdvice}
+      `;
+
+      drawChart(rounds);
+    }
+
+    function loadHistory() {
+      const history = localStorage.getItem('aviatorHistory');
+      if (history) {
+        document.getElementById('historyInput').value = history;
+      } else {
+        alert("No saved history found!");
+      }
+    }
+
+    // Helper functions
+    function countLowStreak(recent) {
+      let streak = 0;
+      for (let i = recent.length - 1; i >= 0; i--) {
+        if (recent[i] <= 2) {
+          streak++;
+        } else {
+          break;
+        }
+      }
+      return streak;
+    }
+
+    function movingAverage(arr, length) {
+      if (arr.length < length) return null;
+      let sum = 0;
+      for (let i = arr.length - length; i < arr.length; i++) {
+        sum += arr[i];
+      }
+      return sum / length;
+    }
+  </script>
+</body>
+</html>
